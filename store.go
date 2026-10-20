@@ -1,8 +1,14 @@
 package main
 
 import (
+	"errors"
 	"sort"
 	"sync"
+)
+
+var (
+	ErrSumberDayaTidakValid = errors.New("sumber daya tidak ada atau jumlah melebihi stok")
+	ErrBentrok              = errors.New("kapasitas slot tidak mencukupi")
 )
 
 type Store struct {
@@ -53,18 +59,34 @@ func (s *Store) cariSumberDaya(id int) (SumberDaya, bool) {
 	return data, ada
 }
 
-func (s *Store) tambahPeminjaman(data Peminjaman) (Peminjaman, bool) {
+func (s *Store) tambahPeminjaman(data Peminjaman) (Peminjaman, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sumber, ada := s.sumberDaya[data.SumberDayaID]
 	if !ada || data.Jumlah < 1 || data.Jumlah > sumber.Stok {
-		return Peminjaman{}, false
+		return Peminjaman{}, ErrSumberDayaTidakValid
+	}
+	// B5: setiap slot harus memiliki kapasitas yang cukup.
+	// Pemeriksaan dan penyimpanan terjadi dalam mutex yang sama.
+	for slot := data.SlotMulai; slot <= data.SlotSelesai; slot++ {
+		terpakai := 0
+		for _, lama := range s.peminjaman {
+			if lama.Status != "aktif" || lama.SumberDayaID != data.SumberDayaID || lama.Tanggal != data.Tanggal {
+				continue
+			}
+			if lama.SlotMulai <= slot && slot <= lama.SlotSelesai {
+				terpakai += lama.Jumlah
+			}
+		}
+		if terpakai+data.Jumlah > sumber.Stok {
+			return Peminjaman{}, ErrBentrok
+		}
 	}
 	data.ID = s.nextPeminjamanID
 	s.nextPeminjamanID++
 	data.Status = "aktif"
 	s.peminjaman[data.ID] = data
-	return data, true
+	return data, nil
 }
 
 func (s *Store) daftarPeminjaman(sumberID *int, tanggal, status string) []Peminjaman {

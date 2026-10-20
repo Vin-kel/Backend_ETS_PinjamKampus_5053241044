@@ -130,9 +130,13 @@ func (h *Handler) buatPeminjaman(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := Peminjaman{SumberDayaID: *body.SumberDayaID, Peminjam: peminjam, Tanggal: tanggal, SlotMulai: *body.SlotMulai, SlotSelesai: *body.SlotSelesai, Jumlah: *body.Jumlah}
-	hasil, berhasil := h.store.tambahPeminjaman(data)
-	if !berhasil {
-		kirimError(w, 400, "sumber daya tidak ada atau jumlah melebihi stok")
+	hasil, err := h.store.tambahPeminjaman(data)
+	if errors.Is(err, ErrSumberDayaTidakValid) {
+		kirimError(w, 400, err.Error())
+		return
+	}
+	if errors.Is(err, ErrBentrok) {
+		kirimError(w, 409, err.Error())
 		return
 	}
 	kirimJSON(w, 201, hasil)
