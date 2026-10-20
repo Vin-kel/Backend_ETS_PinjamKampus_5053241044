@@ -10,6 +10,7 @@ var (
 	ErrSumberDayaTidakValid = errors.New("sumber daya tidak ada atau jumlah melebihi stok")
 	ErrBentrok              = errors.New("kapasitas slot tidak mencukupi")
 	ErrPeminjamanTidakAda   = errors.New("peminjaman tidak ditemukan")
+	ErrBlokirBentrok        = errors.New("jadwal sudah diblokir")
 )
 
 type Store struct {
@@ -67,6 +68,9 @@ func (s *Store) tambahPeminjaman(data Peminjaman) (Peminjaman, error) {
 	if !ada || data.Jumlah < 1 || data.Jumlah > sumber.Stok {
 		return Peminjaman{}, ErrSumberDayaTidakValid
 	}
+	if s.adaBlokir(data.SumberDayaID, data.Tanggal, data.SlotMulai, data.SlotSelesai) {
+		return Peminjaman{}, ErrBlokirBentrok
+	}
 	if s.adaBentrok(data, sumber.Stok, 0) {
 		return Peminjaman{}, ErrBentrok
 	}
@@ -107,6 +111,9 @@ func (s *Store) ubahPeminjaman(id int, data Peminjaman) (Peminjaman, error) {
 	sumber, ada := s.sumberDaya[data.SumberDayaID]
 	if !ada || data.Jumlah < 1 || data.Jumlah > sumber.Stok {
 		return Peminjaman{}, ErrSumberDayaTidakValid
+	}
+	if s.adaBlokir(data.SumberDayaID, data.Tanggal, data.SlotMulai, data.SlotSelesai) {
+		return Peminjaman{}, ErrBlokirBentrok
 	}
 	if s.adaBentrok(data, sumber.Stok, id) {
 		return Peminjaman{}, ErrBentrok
@@ -152,4 +159,62 @@ func (s *Store) cariPeminjaman(id int) (Peminjaman, bool) {
 	defer s.mu.Unlock()
 	data, ada := s.peminjaman[id]
 	return data, ada
+}
+
+// Semua pemanggilan adaBlokir berlangsung saat mutex sudah dikunci.
+func (s *Store) adaBlokir(sumberID int, tanggal string, mulai, selesai int) bool {
+	for _, b := range s.blokir {
+		if b.SumberDayaID == sumberID && b.Tanggal == tanggal && mulai <= b.SlotSelesai && b.SlotMulai <= selesai {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) tambahBlokir(data BlokirJadwal) (BlokirJadwal, []int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ada := s.sumberDaya[data.SumberDayaID]; !ada {
+		return BlokirJadwal{}, nil, ErrSumberDayaTidakValid
+	}
+	if s.adaBlokir(data.SumberDayaID, data.Tanggal, data.SlotMulai, data.SlotSelesai) {
+		return BlokirJadwal{}, nil, ErrBlokirBentrok
+	}
+	data.ID = s.nextBlokirID
+	s.nextBlokirID++
+	s.blokir[data.ID] = data
+	dibatalkan := make([]int, 0)
+	for id, p := range s.peminjaman {
+		if p.Status != "aktif" || p.SumberDayaID != data.SumberDayaID || p.Tanggal != data.Tanggal {
+			continue
+		}
+		if p.SlotMulai <= data.SlotSelesai && data.SlotMulai <= p.SlotSelesai {
+			p.Status = "dibatalkan"
+			s.peminjaman[id] = p
+			dibatalkan = append(dibatalkan, id)
+		}
+	}
+	sort.Ints(dibatalkan)
+	return data, dibatalkan, nil
+}
+
+func (s *Store) daftarBlokir() []BlokirJadwal {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	hasil := make([]BlokirJadwal, 0, len(s.blokir))
+	for _, data := range s.blokir {
+		hasil = append(hasil, data)
+	}
+	sort.Slice(hasil, func(i, j int) bool { return hasil[i].ID < hasil[j].ID })
+	return hasil
+}
+
+func (s *Store) hapusBlokir(id int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ada := s.blokir[id]; !ada {
+		return false
+	}
+	delete(s.blokir, id)
+	return true
 }

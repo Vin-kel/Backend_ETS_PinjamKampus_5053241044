@@ -71,3 +71,53 @@ func TestB7PeminjamanBersamaan(t *testing.T) {
 		t.Errorf("harus tersimpan satu peminjaman, ditemukan %d", len(daftar))
 	}
 }
+
+func TestPersonaEBlokirMembatalkanDanMenolak(t *testing.T) {
+	h := NewHandler()
+	kirim := func(method, url, body string, kode int) []byte {
+		t.Helper()
+		req := httptest.NewRequest(method, url, strings.NewReader(body))
+		res := httptest.NewRecorder()
+		h.ServeHTTP(res, req)
+		if res.Code != kode {
+			t.Fatalf("%s %s: status %d, ingin %d; body: %s", method, url, res.Code, kode, res.Body.String())
+		}
+		return res.Body.Bytes()
+	}
+	kirim("POST", "/sumber-daya", `{"nama":"Lab","jenis":"ruang","stok":2}`, 201)
+	kirim("POST", "/peminjaman", `{"sumber_daya_id":1,"peminjam":"Rina","tanggal":"2026-11-02","slot_mulai":2,"slot_selesai":3,"jumlah":1}`, 201)
+	kirim("POST", "/peminjaman", `{"sumber_daya_id":1,"peminjam":"Budi","tanggal":"2026-11-02","slot_mulai":3,"slot_selesai":4,"jumlah":1}`, 201)
+	res := kirim("POST", "/blokir", `{"sumber_daya_id":1,"tanggal":"2026-11-02","slot_mulai":3,"slot_selesai":3,"keterangan":"Praktikum"}`, 201)
+	var hasil struct {
+		Blokir     BlokirJadwal `json:"blokir"`
+		Dibatalkan []int        `json:"dibatalkan"`
+	}
+	if err := json.Unmarshal(res, &hasil); err != nil {
+		t.Fatal(err)
+	}
+	if hasil.Blokir.ID != 1 || len(hasil.Dibatalkan) != 2 || hasil.Dibatalkan[0] != 1 || hasil.Dibatalkan[1] != 2 {
+		t.Fatalf("hasil blokir tidak sesuai: %+v", hasil)
+	}
+	res = kirim("GET", "/peminjaman/1", "", 200)
+	var p Peminjaman
+	if err := json.Unmarshal(res, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != "dibatalkan" {
+		t.Fatalf("status harus dibatalkan, mendapat %s", p.Status)
+	}
+	// Kapasitas sudah bebas, tetapi blokir tetap mencegah peminjaman baru dan PUT.
+	kirim("POST", "/peminjaman", `{"sumber_daya_id":1,"peminjam":"Ani","tanggal":"2026-11-02","slot_mulai":3,"slot_selesai":4,"jumlah":1}`, 409)
+	kirim("PUT", "/peminjaman/1", `{"sumber_daya_id":1,"peminjam":"Rina","tanggal":"2026-11-02","slot_mulai":3,"slot_selesai":3,"jumlah":1}`, 409)
+	kirim("POST", "/blokir", `{"sumber_daya_id":1,"tanggal":"2026-11-02","slot_mulai":2,"slot_selesai":3,"keterangan":"Servis"}`, 409)
+	kirim("DELETE", "/blokir/1", "", 204)
+	// Menghapus blokir tidak memulihkan status peminjaman yang dibatalkan.
+	res = kirim("GET", "/peminjaman/1", "", 200)
+	if err := json.Unmarshal(res, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != "dibatalkan" {
+		t.Fatalf("hapus blokir memulihkan status: %s", p.Status)
+	}
+	kirim("POST", "/peminjaman", `{"sumber_daya_id":1,"peminjam":"Ani","tanggal":"2026-11-02","slot_mulai":3,"slot_selesai":4,"jumlah":1}`, 201)
+}

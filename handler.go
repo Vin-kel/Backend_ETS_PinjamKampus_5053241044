@@ -25,6 +25,9 @@ func NewHandler() http.Handler {
 	mux.HandleFunc("GET /peminjaman/{id}", h.detailPeminjaman)
 	mux.HandleFunc("PUT /peminjaman/{id}", h.ubahPeminjaman)
 	mux.HandleFunc("DELETE /peminjaman/{id}", h.hapusPeminjaman)
+	mux.HandleFunc("POST /blokir", h.buatBlokir)
+	mux.HandleFunc("GET /blokir", h.lihatBlokir)
+	mux.HandleFunc("DELETE /blokir/{id}", h.hapusBlokir)
 	return mux
 }
 
@@ -141,6 +144,10 @@ func (h *Handler) buatPeminjaman(w http.ResponseWriter, r *http.Request) {
 		kirimError(w, 409, err.Error())
 		return
 	}
+	if errors.Is(err, ErrBlokirBentrok) {
+		kirimError(w, 409, err.Error())
+		return
+	}
 	kirimJSON(w, 201, hasil)
 }
 
@@ -218,6 +225,10 @@ func (h *Handler) ubahPeminjaman(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, ErrBentrok) {
+		kirimError(w, 409, err.Error())
+		return
+	}
+	if errors.Is(err, ErrBlokirBentrok) {
 		kirimError(w, 409, err.Error())
 		return
 	}
