@@ -1,6 +1,6 @@
 # PinjamKampus API
 
-- Nama dan NRP: -
+- Nama dan NRP: Kelvin Aubert Julianto 5053241044
 - Persona: E
 - Cara menjalankan: `go run .` lalu buka http://localhost:8080
 
@@ -14,6 +14,3 @@
 - [✓] B7 Aman untuk permintaan bersamaan
 - [✓] Fitur khas persona
 - [✓] Change request
-
-## Yang belum selesai
-(Tulis jujur bagian mana yang belum berjalan.)

@@ -17,16 +17,21 @@ Keputusan saya adalah untuk penyimpanan data blokir jadwal secara terpisah dari 
 
 Saya memutuskan pemisahan tersebut karena blokir jadwal bukan peminjaman biasa dan memiliki informasi tambahan seperti keterangan. Dengan rancangan ini, saat blokir dibuat, sistem dapat mencari peminjaman yang terkena blokir dan mengubah statusnya menjadi dibatalkan tanpa menghapus data peminjaman tersebut.
 
-## 4. Bug atau kendala (minimal dua)
+## 4. Bug atau kendala 
 ### Bug 1
-- Gejala:
-- Cara menemukan:
-- Penyebab dan solusi:
+- Gejala: Saat mencoba menjalankan go run ., muncul pesan runtime.main_main·f: function main is undeclared in the main package. Server belum bisa dijalankan.
+- Cara menemukan: Pesan error muncul di terminal ketika menjalankan proyek. Saya kemudian memeriksa direktori kerja, file main.go, dan keberadaan fungsi func main().
+Penyebab dan solusi: Pesan tersebut berarti Go tidak menemukan fungsi entry point
+- Penyebab dan solusi: Pesan tersebut berarti Go tidak menemukan fungsi entry point main() pada paket yang sedang dijalankan. Solusinya adalah memastikan main.go berada di direktori proyek yang benar, menggunakan package main, dan memiliki func main() yang menjalankan http.ListenAndServe. Penyebab spesifik di komputer saya dan hasil perbaikannya masih perlu dikonfirmasi setelah pengecekan.
 
 ### Bug 2
-- Gejala:
-- Cara menemukan:
-- Penyebab dan solusi:
+- Gejala/kendala: Pada rancangan awal pemeriksaan bentrok, ada risiko peminjaman yang sedang diubah melalui PUT ikut dihitung sebagai peminjaman lain. Akibatnya perubahan pada slot yang sama bisa ditolak 409 meskipun sebenarnya tidak melewati stok.
+- Cara menemukan: Saya menemukan risiko ini saat meninjau logika pemeriksaan bentrok untuk B6 dan membandingkannya dengan aturan PUT dalam requirement. Ini merupakan potensi bug dari peninjauan kode, bukan error yang sudah saya buktikan muncul saat menjalankan program.
+- Penyebab dan solusi: Perhitungan kapasitas semula memeriksa seluruh peminjaman aktif. Saya menambahkan parameter kecualiID pada fungsi adaBentrok() agar peminjaman dengan ID yang sedang diubah tidak dihitung dua kali. Setelah itu, PUT tetap memeriksa peminjaman lain dan menolak perubahan yang benar-benar bentrok.
 
 ## 5. Change request
-(Apa yang diminta, bagian kode mana yang kamu ubah, dan satu keputusan desain yang kamu ambil.)
+Pada Change Request B, tim frontend meminta agar respons 409 dari POST /peminjaman karena slot atau kapasitas penuh tidak hanya berisi pesan error, tetapi juga field bentrok_dengan yang menunjukkan ID peminjaman penghalang secara urut naik. Field tersebut tidak boleh muncul pada error lain atau pada respons PUT. Untuk Persona E, jika penolakan disebabkan oleh blokir jadwal, field tersebut tidak diwajibkan.
+
+Pengubahan store.go dengan menambahkan daftarPenghalang() untuk mengumpulkan ID peminjaman aktif yang menggunakan sumber daya dan tanggal sama serta mempunyai rentang slot beririsan. Saya juga membuat BentrokKapasitasError untuk membawa daftar ID tersebut. Di handler.go, respons POST /peminjaman diubah agar menampilkan error dan bentrok_dengan khusus saat kapasitas penuh. Pengujian kasus tersebut ditambahkan ke api_test.go.
+
+Keputusan desain adalah mengumpulkan ID penghalang ketika sync.Mutex pada Store masih terkunci, lalu membawanya ke handler melalui tipe error khusus. Dengan begitu daftar ID berasal dari kondisi data yang sama dengan saat bentrok diperiksa, dan respons error untuk PUT maupun blokir tidak ikut berubah.
