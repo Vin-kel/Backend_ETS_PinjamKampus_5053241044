@@ -13,6 +13,12 @@ var (
 	ErrBlokirBentrok        = errors.New("jadwal sudah diblokir")
 )
 
+// BentrokKapasitasError membawa ID penghalang khusus untuk POST /peminjaman.
+type BentrokKapasitasError struct{ IDs []int }
+
+func (e *BentrokKapasitasError) Error() string { return ErrBentrok.Error() }
+func (e *BentrokKapasitasError) Unwrap() error { return ErrBentrok }
+
 type Store struct {
 	mu               sync.Mutex
 	sumberDaya       map[int]SumberDaya
@@ -72,13 +78,28 @@ func (s *Store) tambahPeminjaman(data Peminjaman) (Peminjaman, error) {
 		return Peminjaman{}, ErrBlokirBentrok
 	}
 	if s.adaBentrok(data, sumber.Stok, 0) {
-		return Peminjaman{}, ErrBentrok
+		return Peminjaman{}, &BentrokKapasitasError{IDs: s.daftarPenghalang(data)}
 	}
 	data.ID = s.nextPeminjamanID
 	s.nextPeminjamanID++
 	data.Status = "aktif"
 	s.peminjaman[data.ID] = data
 	return data, nil
+}
+
+// Hanya dipanggil saat mutex terkunci; urutkan ID agar respons deterministik.
+func (s *Store) daftarPenghalang(data Peminjaman) []int {
+	ids := make([]int, 0)
+	for _, p := range s.peminjaman {
+		if p.Status != "aktif" || p.SumberDayaID != data.SumberDayaID || p.Tanggal != data.Tanggal {
+			continue
+		}
+		if p.SlotMulai <= data.SlotSelesai && data.SlotMulai <= p.SlotSelesai {
+			ids = append(ids, p.ID)
+		}
+	}
+	sort.Ints(ids)
+	return ids
 }
 
 // Dipanggil hanya ketika mutex Store sedang dikunci.

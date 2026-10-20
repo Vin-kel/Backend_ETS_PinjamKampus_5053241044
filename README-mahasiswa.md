@@ -13,7 +13,7 @@
 - [✓] B6 Ubah dan hapus
 - [✓] B7 Aman untuk permintaan bersamaan
 - [✓] Fitur khas persona
-- [ ] Change request
+- [✓] Change request
 
 ## Yang belum selesai
 (Tulis jujur bagian mana yang belum berjalan.)
