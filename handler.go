@@ -23,6 +23,8 @@ func NewHandler() http.Handler {
 	mux.HandleFunc("POST /peminjaman", h.buatPeminjaman)
 	mux.HandleFunc("GET /peminjaman", h.lihatPeminjaman)
 	mux.HandleFunc("GET /peminjaman/{id}", h.detailPeminjaman)
+	mux.HandleFunc("PUT /peminjaman/{id}", h.ubahPeminjaman)
+	mux.HandleFunc("DELETE /peminjaman/{id}", h.hapusPeminjaman)
 	return mux
 }
 
@@ -170,4 +172,67 @@ func (h *Handler) detailPeminjaman(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kirimJSON(w, 200, data)
+}
+
+func (h *Handler) ubahPeminjaman(w http.ResponseWriter, r *http.Request) {
+	// Urutan: ID (400), keberadaan peminjaman (404), body (400), bentrok (409).
+	id, err := bacaID(r)
+	if err != nil {
+		kirimError(w, 400, err.Error())
+		return
+	}
+	if _, ada := h.store.cariPeminjaman(id); !ada {
+		kirimError(w, 404, "peminjaman tidak ditemukan")
+		return
+	}
+	var body struct {
+		SumberDayaID *int    `json:"sumber_daya_id"`
+		Peminjam     *string `json:"peminjam"`
+		Tanggal      *string `json:"tanggal"`
+		SlotMulai    *int    `json:"slot_mulai"`
+		SlotSelesai  *int    `json:"slot_selesai"`
+		Jumlah       *int    `json:"jumlah"`
+	}
+	if err := bacaJSON(r, &body); err != nil {
+		kirimError(w, 400, "body JSON tidak valid")
+		return
+	}
+	if body.SumberDayaID == nil || body.Peminjam == nil || body.Tanggal == nil || body.SlotMulai == nil || body.SlotSelesai == nil || body.Jumlah == nil {
+		kirimError(w, 400, "keenam field peminjaman wajib ada")
+		return
+	}
+	peminjam := strings.TrimSpace(*body.Peminjam)
+	tanggal := strings.TrimSpace(*body.Tanggal)
+	if utf8.RuneCountInString(peminjam) == 0 || utf8.RuneCountInString(peminjam) > 50 || !tanggalValid(tanggal) || *body.SlotMulai < 1 || *body.SlotSelesai > 8 || *body.SlotMulai > *body.SlotSelesai || *body.Jumlah < 1 {
+		kirimError(w, 400, "data peminjaman tidak valid")
+		return
+	}
+	data := Peminjaman{SumberDayaID: *body.SumberDayaID, Peminjam: peminjam, Tanggal: tanggal, SlotMulai: *body.SlotMulai, SlotSelesai: *body.SlotSelesai, Jumlah: *body.Jumlah}
+	hasil, err := h.store.ubahPeminjaman(id, data)
+	if errors.Is(err, ErrPeminjamanTidakAda) {
+		kirimError(w, 404, err.Error())
+		return
+	}
+	if errors.Is(err, ErrSumberDayaTidakValid) {
+		kirimError(w, 400, err.Error())
+		return
+	}
+	if errors.Is(err, ErrBentrok) {
+		kirimError(w, 409, err.Error())
+		return
+	}
+	kirimJSON(w, 200, hasil)
+}
+
+func (h *Handler) hapusPeminjaman(w http.ResponseWriter, r *http.Request) {
+	id, err := bacaID(r)
+	if err != nil {
+		kirimError(w, 400, err.Error())
+		return
+	}
+	if !h.store.hapusPeminjaman(id) {
+		kirimError(w, 404, "peminjaman tidak ditemukan")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

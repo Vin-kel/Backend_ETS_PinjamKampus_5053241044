@@ -9,6 +9,7 @@ import (
 var (
 	ErrSumberDayaTidakValid = errors.New("sumber daya tidak ada atau jumlah melebihi stok")
 	ErrBentrok              = errors.New("kapasitas slot tidak mencukupi")
+	ErrPeminjamanTidakAda   = errors.New("peminjaman tidak ditemukan")
 )
 
 type Store struct {
@@ -66,27 +67,64 @@ func (s *Store) tambahPeminjaman(data Peminjaman) (Peminjaman, error) {
 	if !ada || data.Jumlah < 1 || data.Jumlah > sumber.Stok {
 		return Peminjaman{}, ErrSumberDayaTidakValid
 	}
-	// B5: setiap slot harus memiliki kapasitas yang cukup.
-	// Pemeriksaan dan penyimpanan terjadi dalam mutex yang sama.
-	for slot := data.SlotMulai; slot <= data.SlotSelesai; slot++ {
-		terpakai := 0
-		for _, lama := range s.peminjaman {
-			if lama.Status != "aktif" || lama.SumberDayaID != data.SumberDayaID || lama.Tanggal != data.Tanggal {
-				continue
-			}
-			if lama.SlotMulai <= slot && slot <= lama.SlotSelesai {
-				terpakai += lama.Jumlah
-			}
-		}
-		if terpakai+data.Jumlah > sumber.Stok {
-			return Peminjaman{}, ErrBentrok
-		}
+	if s.adaBentrok(data, sumber.Stok, 0) {
+		return Peminjaman{}, ErrBentrok
 	}
 	data.ID = s.nextPeminjamanID
 	s.nextPeminjamanID++
 	data.Status = "aktif"
 	s.peminjaman[data.ID] = data
 	return data, nil
+}
+
+// Dipanggil hanya ketika mutex Store sedang dikunci.
+// kecualiID = 0 untuk POST; pada PUT, data lama diabaikan dari perhitungan.
+func (s *Store) adaBentrok(data Peminjaman, stok, kecualiID int) bool {
+	for slot := data.SlotMulai; slot <= data.SlotSelesai; slot++ {
+		terpakai := 0
+		for _, lama := range s.peminjaman {
+			if lama.ID == kecualiID || lama.Status != "aktif" || lama.SumberDayaID != data.SumberDayaID || lama.Tanggal != data.Tanggal {
+				continue
+			}
+			if lama.SlotMulai <= slot && slot <= lama.SlotSelesai {
+				terpakai += lama.Jumlah
+			}
+		}
+		if terpakai+data.Jumlah > stok {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) ubahPeminjaman(id int, data Peminjaman) (Peminjaman, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lama, ada := s.peminjaman[id]
+	if !ada {
+		return Peminjaman{}, ErrPeminjamanTidakAda
+	}
+	sumber, ada := s.sumberDaya[data.SumberDayaID]
+	if !ada || data.Jumlah < 1 || data.Jumlah > sumber.Stok {
+		return Peminjaman{}, ErrSumberDayaTidakValid
+	}
+	if s.adaBentrok(data, sumber.Stok, id) {
+		return Peminjaman{}, ErrBentrok
+	}
+	data.ID = id
+	data.Status = lama.Status
+	s.peminjaman[id] = data
+	return data, nil
+}
+
+func (s *Store) hapusPeminjaman(id int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ada := s.peminjaman[id]; !ada {
+		return false
+	}
+	delete(s.peminjaman, id)
+	return true
 }
 
 func (s *Store) daftarPeminjaman(sumberID *int, tanggal, status string) []Peminjaman {
